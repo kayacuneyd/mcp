@@ -106,6 +106,25 @@
       nextBtn: document.getElementById('nextBtn')
     };
 
+    // Listedeki her link için:
+    const sumBtn = document.createElement('button');
+    sumBtn.textContent = 'Özetle';
+    sumBtn.className = 'border rounded px-2 py-1 text-sm';
+    sumBtn.onclick = async () => {
+    statusEl.textContent = 'Özet alınıyor…';
+    const res = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+        tool: 'summarize_url',
+        args: { url: article.url, lang: 'tr', max_tokens: 160 }
+        })
+    });
+    const js = await res.json();
+    statusEl.textContent = res.ok ? 'OK' : 'Hata';
+    // js.summary metnini kartta göster
+    };
+
     // URL param -> form state
     function loadFromQuery() {
       const p = new URLSearchParams(location.search);
