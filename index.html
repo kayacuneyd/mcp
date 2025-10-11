@@ -59,6 +59,20 @@
           <input id="offset" type="number" min="0" value="0"
                  class="w-full border rounded-lg p-2" />
         </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-1">Özet dili (summary language)</label>
+          <select id="sumLang" class="w-full border rounded-lg p-2">
+            <option value="tr" selected>Türkçe</option>
+            <option value="de">Deutsch</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-2 mt-6">
+          <input id="autoSummary" type="checkbox" class="h-4 w-4" checked />
+          <label for="autoSummary" class="text-sm">Özetleri otomatik getir</label>
+        </div>
       </div>
 
       <div class="mt-4 flex items-center gap-2">
@@ -104,25 +118,8 @@
       list: document.getElementById('list'),
       prevBtn: document.getElementById('prevBtn'),
       nextBtn: document.getElementById('nextBtn')
-    };
-
-    // Listedeki her link için:
-    const sumBtn = document.createElement('button');
-    sumBtn.textContent = 'Özetle';
-    sumBtn.className = 'border rounded px-2 py-1 text-sm';
-    sumBtn.onclick = async () => {
-    statusEl.textContent = 'Özet alınıyor…';
-    const res = await fetch(ENDPOINT, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-        tool: 'summarize_url',
-        args: { url: article.url, lang: 'tr', max_tokens: 160 }
-        })
-    });
-    const js = await res.json();
-    statusEl.textContent = res.ok ? 'OK' : 'Hata';
-    // js.summary metnini kartta göster
+      , sumLang: document.getElementById('sumLang')
+      , autoSummary: document.getElementById('autoSummary')
     };
 
     // URL param -> form state
@@ -137,6 +134,8 @@
       els.q.value = get('q','');
       els.limit.value = get('limit','10');
       els.offset.value = get('offset','0');
+      els.sumLang.value = get('sumLang','tr');
+      els.autoSummary.checked = get('autoSummary','1') !== '0';
       toggleQ();
     }
 
@@ -168,7 +167,37 @@
       if (els.mode.value === 'search' && els.q.value) p.set('q', els.q.value);
       p.set('limit', els.limit.value);
       p.set('offset', els.offset.value);
+      p.set('sumLang', els.sumLang.value);
+      p.set('autoSummary', els.autoSummary.checked ? '1' : '0');
       return p.toString();
+    }
+
+    async function summarizeInto(containerEl, url) {
+      const lang = els.sumLang.value || 'tr';
+      const holder = document.createElement('div');
+      holder.className = 'mt-2 text-sm text-gray-800 bg-gray-50 border rounded p-2';
+      holder.textContent = 'Özet alınıyor…';
+      containerEl.appendChild(holder);
+      try {
+        const res = await fetch(els.endpoint.value, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            tool: 'summarize_url',
+            args: { url, lang, max_tokens: 180 }
+          })
+        });
+        const js = await res.json();
+        if (!res.ok) {
+          holder.textContent = js && js.error ? `Özet hatası: ${js.error}` : `Özet hatası (HTTP ${res.status})`;
+          holder.classList.add('text-red-600');
+          return;
+        }
+        holder.textContent = js.summary || '(özet bulunamadı)';
+      } catch (e) {
+        holder.textContent = 'Özet alma sırasında hata';
+        holder.classList.add('text-red-600');
+      }
     }
 
     async function run() {
@@ -202,6 +231,9 @@
             <div class="text-sm text-gray-600">${(a.country||'').toUpperCase()}${src}${ts}</div>
           `;
           els.list.appendChild(li);
+          if (els.autoSummary.checked && url && url !== '#') {
+            summarizeInto(li, url);
+          }
         }
       } catch (e) {
         els.status.textContent = 'Fetch error';
@@ -242,6 +274,8 @@
         els.status.textContent = link;
       }
     });
+    els.sumLang.addEventListener('change', () => { if (els.list.children.length) run(); });
+    els.autoSummary.addEventListener('change', () => { if (els.list.children.length) run(); });
 
     // Init
     loadFromQuery();
