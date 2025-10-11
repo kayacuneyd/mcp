@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kaya News — Mediastack MCP UI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div class="max-w-4xl mx-auto p-4 md:p-6">
+    <h1 class="text-2xl font-bold mb-4">Kaya News — Mediastack MCP</h1>
+
+    <!-- Settings Card -->
+    <div class="bg-white rounded-xl shadow p-4 mb-4">
+      <div class="grid md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">Mode</label>
+          <select id="mode" class="w-full border rounded-lg p-2">
+            <option value="headlines">Headlines (ülke/dil/kategori)</option>
+            <option value="search">Search (anahtar kelime)</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-1">Endpoint (MCP)</label>
+          <input id="endpoint" class="w-full border rounded-lg p-2"
+                 value="https://kayacuneyt-newsmcp.cuneydkaya.workers.dev/mcp" />
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-1">Ülke(ler) — countries</label>
+          <input id="countries" class="w-full border rounded-lg p-2" placeholder="de veya de,tr" />
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-1">Dil(ler) — languages</label>
+          <input id="languages" class="w-full border rounded-lg p-2" placeholder="de veya de,en" />
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-1">Kategori(ler)</label>
+          <input id="categories" class="w-full border rounded-lg p-2"
+                 placeholder="general,technology,sports" />
+        </div>
+
+        <div id="qWrap" class="">
+          <label class="block text-sm font-medium mb-1">Anahtar kelime (q) — Search modunda</label>
+          <input id="q" class="w-full border rounded-lg p-2" placeholder="örn: visa, Stuttgart, Berlin" />
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-1">Limit</label>
+          <input id="limit" type="number" min="1" max="50" value="10"
+                 class="w-full border rounded-lg p-2" />
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-1">Offset (sayfalama)</label>
+          <input id="offset" type="number" min="0" value="0"
+                 class="w-full border rounded-lg p-2" />
+        </div>
+      </div>
+
+      <div class="mt-4 flex items-center gap-2">
+        <button id="runBtn"
+                class="bg-black text-white rounded-lg px-4 py-2 hover:bg-gray-800">
+          Getir
+        </button>
+        <button id="shareBtn"
+                class="border rounded-lg px-4 py-2 hover:bg-gray-100">
+          Link’i Kopyala
+        </button>
+        <span id="status" class="text-sm text-gray-500 ml-2"></span>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="bg-white rounded-xl shadow p-4">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-lg font-semibold">Sonuçlar</h2>
+        <div class="flex gap-2">
+          <button id="prevBtn" class="border rounded-lg px-3 py-1">Prev</button>
+          <button id="nextBtn" class="border rounded-lg px-3 py-1">Next</button>
+        </div>
+      </div>
+      <ul id="list" class="space-y-3"></ul>
+    </div>
+  </div>
+
+  <script>
+    const els = {
+      mode: document.getElementById('mode'),
+      endpoint: document.getElementById('endpoint'),
+      countries: document.getElementById('countries'),
+      languages: document.getElementById('languages'),
+      categories: document.getElementById('categories'),
+      q: document.getElementById('q'),
+      qWrap: document.getElementById('qWrap'),
+      limit: document.getElementById('limit'),
+      offset: document.getElementById('offset'),
+      runBtn: document.getElementById('runBtn'),
+      shareBtn: document.getElementById('shareBtn'),
+      status: document.getElementById('status'),
+      list: document.getElementById('list'),
+      prevBtn: document.getElementById('prevBtn'),
+      nextBtn: document.getElementById('nextBtn')
+    };
+
+    // URL param -> form state
+    function loadFromQuery() {
+      const p = new URLSearchParams(location.search);
+      const get = (k, d='') => p.get(k) ?? d;
+      els.mode.value = get('mode','headlines');
+      els.endpoint.value = get('endpoint', els.endpoint.value);
+      els.countries.value = get('countries','');
+      els.languages.value = get('languages','');
+      els.categories.value = get('categories','');
+      els.q.value = get('q','');
+      els.limit.value = get('limit','10');
+      els.offset.value = get('offset','0');
+      toggleQ();
+    }
+
+    function toggleQ() {
+      els.qWrap.style.opacity = (els.mode.value === 'search') ? '1' : '0.5';
+    }
+
+    function toArgs() {
+      const args = {};
+      const v = (el) => el.value.trim();
+      if (v(els.countries)) args.countries = v(els.countries);
+      if (v(els.languages)) args.languages = v(els.languages);
+      if (v(els.categories)) args.categories = v(els.categories);
+      if (els.mode.value === 'search' && v(els.q)) args.q = v(els.q);
+      const L = parseInt(els.limit.value, 10);
+      const O = parseInt(els.offset.value, 10);
+      if (!isNaN(L)) args.limit = L;
+      if (!isNaN(O)) args.offset = O;
+      return args;
+    }
+
+    function toQuery() {
+      const p = new URLSearchParams();
+      p.set('mode', els.mode.value);
+      p.set('endpoint', els.endpoint.value);
+      if (els.countries.value) p.set('countries', els.countries.value);
+      if (els.languages.value) p.set('languages', els.languages.value);
+      if (els.categories.value) p.set('categories', els.categories.value);
+      if (els.mode.value === 'search' && els.q.value) p.set('q', els.q.value);
+      p.set('limit', els.limit.value);
+      p.set('offset', els.offset.value);
+      return p.toString();
+    }
+
+    async function run() {
+      els.status.textContent = 'Fetching...';
+      els.list.innerHTML = '';
+      const tool = (els.mode.value === 'search') ? 'search_news' : 'get_top_headlines';
+      const body = { tool, args: toArgs() };
+
+      try {
+        const res = await fetch(els.endpoint.value, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const json = await res.json();
+        els.status.textContent = res.ok ? 'OK' : `Error ${res.status}`;
+        const articles = json.articles || json.data || [];
+        if (!Array.isArray(articles) || articles.length === 0) {
+          els.list.innerHTML = '<li class="text-sm text-gray-500">Sonuç yok.</li>';
+          return;
+        }
+        for (const a of articles) {
+          const li = document.createElement('li');
+          li.className = 'border rounded-lg p-3';
+          const title = a.title || '(başlık yok)';
+          const url = a.url || '#';
+          const src = a.source ? ` · ${a.source}` : '';
+          const ts = a.published_at ? ` · ${new Date(a.published_at).toLocaleString()}` : '';
+          li.innerHTML = `
+            <a href="${url}" target="_blank" class="font-medium hover:underline">${title}</a>
+            <div class="text-sm text-gray-600">${(a.country||'').toUpperCase()}${src}${ts}</div>
+          `;
+          els.list.appendChild(li);
+        }
+      } catch (e) {
+        els.status.textContent = 'Fetch error';
+        els.list.innerHTML = `<li class="text-sm text-red-600">Hata: ${e}</li>`;
+      }
+
+      // URL'yi güncelle
+      const qs = toQuery();
+      const newUrl = location.pathname + '?' + qs;
+      history.replaceState(null, '', newUrl);
+    }
+
+    function nextPage() {
+      const o = parseInt(els.offset.value || '0', 10);
+      const l = parseInt(els.limit.value || '10', 10);
+      els.offset.value = String(Math.max(0, o + l));
+      run();
+    }
+    function prevPage() {
+      const o = parseInt(els.offset.value || '0', 10);
+      const l = parseInt(els.limit.value || '10', 10);
+      els.offset.value = String(Math.max(0, o - l));
+      run();
+    }
+
+    // Events
+    els.mode.addEventListener('change', () => { toggleQ(); run(); });
+    els.runBtn.addEventListener('click', run);
+    els.prevBtn.addEventListener('click', prevPage);
+    els.nextBtn.addEventListener('click', nextPage);
+    els.shareBtn.addEventListener('click', async () => {
+      const qs = toQuery();
+      const link = location.origin + location.pathname + '?' + qs;
+      try {
+        await navigator.clipboard.writeText(link);
+        els.status.textContent = 'Link kopyalandı';
+      } catch {
+        els.status.textContent = link;
+      }
+    });
+
+    // Init
+    loadFromQuery();
+    // İlk yüklemede otomatik sorgu (isteğe bağlı)
+    if (location.search) run();
+  </script>
+</body>
+</html>
