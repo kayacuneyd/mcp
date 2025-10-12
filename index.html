@@ -34,13 +34,36 @@
 
         <div>
           <label class="block text-sm font-medium mb-1">Dil(ler) — languages</label>
-          <input id="languages" class="w-full border rounded-lg p-2" placeholder="de veya de,en" />
+          <select id="languages" class="w-full border rounded-lg p-2">
+            <option value="">(hepsi)</option>
+            <option value="de">de</option>
+            <option value="en">en</option>
+            <option value="tr">tr</option>
+            <option value="fr">fr</option>
+            <option value="es">es</option>
+            <option value="it">it</option>
+            <option value="ru">ru</option>
+            <option value="ar">ar</option>
+            <option value="zh">zh</option>
+            <option value="nl">nl</option>
+            <option value="no">no</option>
+            <option value="pt">pt</option>
+            <option value="se">se</option>
+          </select>
         </div>
 
         <div>
           <label class="block text-sm font-medium mb-1">Kategori(ler)</label>
-          <input id="categories" class="w-full border rounded-lg p-2"
-                 placeholder="general,technology,sports" />
+          <select id="categories" class="w-full border rounded-lg p-2">
+            <option value="">(hepsi)</option>
+            <option value="general">general</option>
+            <option value="business">business</option>
+            <option value="entertainment">entertainment</option>
+            <option value="health">health</option>
+            <option value="science">science</option>
+            <option value="sports">sports</option>
+            <option value="technology">technology</option>
+          </select>
         </div>
 
         <div id="qWrap" class="">
@@ -58,6 +81,15 @@
           <label class="block text-sm font-medium mb-1">Offset (sayfalama)</label>
           <input id="offset" type="number" min="0" value="0"
                  class="w-full border rounded-lg p-2" />
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-1">Tarih (başlangıç)</label>
+          <input id="dateFrom" type="date" class="w-full border rounded-lg p-2" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Tarih (bitiş)</label>
+          <input id="dateTo" type="date" class="w-full border rounded-lg p-2" />
         </div>
 
         <div>
@@ -120,6 +152,8 @@
       nextBtn: document.getElementById('nextBtn')
       , sumLang: document.getElementById('sumLang')
       , autoSummary: document.getElementById('autoSummary')
+      , dateFrom: document.getElementById('dateFrom')
+      , dateTo: document.getElementById('dateTo')
     };
 
     // URL param -> form state
@@ -136,6 +170,8 @@
       els.offset.value = get('offset','0');
       els.sumLang.value = get('sumLang','tr');
       els.autoSummary.checked = get('autoSummary','1') !== '0';
+      els.dateFrom.value = get('dateFrom','');
+      els.dateTo.value = get('dateTo','');
       toggleQ();
     }
 
@@ -154,6 +190,12 @@
       const O = parseInt(els.offset.value, 10);
       if (!isNaN(L)) args.limit = L;
       if (!isNaN(O)) args.offset = O;
+      if (els.dateFrom.value || els.dateTo.value) {
+        const from = els.dateFrom.value || '';
+        const to = els.dateTo.value || '';
+        const date = (from && to) ? `${from},${to}` : (from || to);
+        if (date) args.date = date; // Worker tarafında opsiyonel destek
+      }
       return args;
     }
 
@@ -169,31 +211,88 @@
       p.set('offset', els.offset.value);
       p.set('sumLang', els.sumLang.value);
       p.set('autoSummary', els.autoSummary.checked ? '1' : '0');
+      if (els.dateFrom.value) p.set('dateFrom', els.dateFrom.value);
+      if (els.dateTo.value) p.set('dateTo', els.dateTo.value);
       return p.toString();
+    }
+
+    const MAX_SUM_CONCURRENCY = 3;
+    let inflight = 0;
+    const queue = [];
+
+    function scheduleSummary(li, url, priority=false) {
+      if (li.dataset.scheduled === '1') return; // prevent double
+      li.dataset.scheduled = '1';
+      if (priority) queue.unshift({ li, url }); else queue.push({ li, url });
+      processQueue();
+    }
+
+    async function processQueue() {
+      while (inflight < MAX_SUM_CONCURRENCY && queue.length) {
+        const job = queue.shift();
+        inflight++;
+        summarizeInto(job.li, job.url)
+          .finally(() => {
+            inflight--;
+            processQueue();
+          });
+      }
     }
 
     async function summarizeInto(containerEl, url) {
       const lang = els.sumLang.value || 'tr';
-      const holder = document.createElement('div');
-      holder.className = 'mt-2 text-sm text-gray-800 bg-gray-50 border rounded p-2';
+      let holder = containerEl.querySelector('.summary');
+      if (!holder) {
+        holder = document.createElement('div');
+        holder.className = 'summary mt-2 text-sm text-gray-800 bg-gray-50 border rounded p-2';
+        containerEl.appendChild(holder);
+      }
       holder.textContent = 'Özet alınıyor…';
-      containerEl.appendChild(holder);
       try {
-        const res = await fetch(els.endpoint.value, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            tool: 'summarize_url',
-            args: { url, lang, max_tokens: 180 }
-          })
-        });
-        const js = await res.json();
-        if (!res.ok) {
-          holder.textContent = js && js.error ? `Özet hatası: ${js.error}` : `Özet hatası (HTTP ${res.status})`;
+        // basic retry with backoff (up to 2 retries)
+        const call = async (attempt=0) => {
+          const res = await fetch(els.endpoint.value, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ tool: 'summarize_url', args: { url, lang, max_tokens: 180 } })
+          });
+          if (!res.ok && (res.status === 429 || res.status >= 500) && attempt < 2) {
+            await new Promise(r => setTimeout(r, (attempt+1)*800));
+            return call(attempt+1);
+          }
+          const js = await res.json().catch(()=>({}));
+          return { ok: res.ok, js, status: res.status };
+        };
+        const { ok, js, status } = await call(0);
+        if (!ok) {
+          holder.textContent = js && js.error ? `Özet hatası: ${js.error}` : `Özet hatası (HTTP ${status})`;
           holder.classList.add('text-red-600');
           return;
         }
-        holder.textContent = js.summary || '(özet bulunamadı)';
+        const summary = js.summary || '(özet bulunamadı)';
+        holder.textContent = summary;
+        // actions
+        const actions = containerEl.querySelector('.actions');
+        if (actions) {
+          actions.classList.remove('hidden');
+          const copyBtn = actions.querySelector('.copy');
+          const shareBtn = actions.querySelector('.share');
+          const tweetA = actions.querySelector('.tweet');
+          copyBtn.onclick = async () => {
+            try { await navigator.clipboard.writeText(summary); els.status.textContent = 'Summary copied'; }
+            catch { els.status.textContent = 'Copy failed'; }
+          };
+          shareBtn.onclick = async () => {
+            const shareData = { title: 'Haber Özeti', text: summary, url };
+            if (navigator.share) {
+              try { await navigator.share(shareData); } catch {}
+            } else {
+              try { await navigator.clipboard.writeText(`${summary}\n${url}`); els.status.textContent = 'Copied for share'; } catch {}
+            }
+          };
+          const tweetText = encodeURIComponent(summary.length > 260 ? summary.slice(0,257)+"…" : summary);
+          tweetA.href = `https://twitter.com/intent/tweet?text=${tweetText}&url=${encodeURIComponent(url)}&via=baltikpostasi`;
+        }
       } catch (e) {
         holder.textContent = 'Özet alma sırasında hata';
         holder.classList.add('text-red-600');
@@ -203,6 +302,22 @@
     async function run() {
       els.status.textContent = 'Fetching...';
       els.list.innerHTML = '';
+
+      // Reset scheduling state
+      inflight = 0; queue.length = 0;
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            const li = e.target;
+            const url = li.dataset.url;
+            if (els.autoSummary.checked && url && url !== '#') {
+              scheduleSummary(li, url, true); // visible first
+              io.unobserve(li);
+            }
+          }
+        }
+      }, { root: null, rootMargin: '0px', threshold: 0.2 });
+
       const tool = (els.mode.value === 'search') ? 'search_news' : 'get_top_headlines';
       const body = { tool, args: toArgs() };
 
@@ -217,6 +332,7 @@
         const articles = json.articles || json.data || [];
         if (!Array.isArray(articles) || articles.length === 0) {
           els.list.innerHTML = '<li class="text-sm text-gray-500">Sonuç yok.</li>';
+          io.disconnect();
           return;
         }
         for (const a of articles) {
@@ -224,15 +340,24 @@
           li.className = 'border rounded-lg p-3';
           const title = a.title || '(başlık yok)';
           const url = a.url || '#';
+          li.dataset.url = url;
           const src = a.source ? ` · ${a.source}` : '';
           const ts = a.published_at ? ` · ${new Date(a.published_at).toLocaleString()}` : '';
           li.innerHTML = `
             <a href="${url}" target="_blank" class="font-medium hover:underline">${title}</a>
             <div class="text-sm text-gray-600">${(a.country||'').toUpperCase()}${src}${ts}</div>
+            <div class="mt-2 hidden actions gap-2">
+              <button class="copy border rounded px-2 py-1 text-xs">Copy summary</button>
+              <button class="share border rounded px-2 py-1 text-xs">Share</button>
+              <a class="tweet border rounded px-2 py-1 text-xs" target="_blank">Tweet</a>
+            </div>
           `;
           els.list.appendChild(li);
-          if (els.autoSummary.checked && url && url !== '#') {
-            summarizeInto(li, url);
+
+          // If autoSummary disabled, still observe for potential manual trigger later
+          if (els.autoSummary.checked) {
+            // schedule lazily by visibility
+            io.observe(li);
           }
         }
       } catch (e) {
@@ -244,6 +369,8 @@
       const qs = toQuery();
       const newUrl = location.pathname + '?' + qs;
       history.replaceState(null, '', newUrl);
+
+      io.disconnect();
     }
 
     function nextPage() {
@@ -276,6 +403,10 @@
     });
     els.sumLang.addEventListener('change', () => { if (els.list.children.length) run(); });
     els.autoSummary.addEventListener('change', () => { if (els.list.children.length) run(); });
+    els.languages.addEventListener('change', () => run());
+    els.categories.addEventListener('change', () => run());
+    els.dateFrom.addEventListener('change', () => run());
+    els.dateTo.addEventListener('change', () => run());
 
     // Init
     loadFromQuery();
