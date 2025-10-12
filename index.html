@@ -290,8 +290,66 @@
               try { await navigator.clipboard.writeText(`${summary}\n${url}`); els.status.textContent = 'Copied for share'; } catch {}
             }
           };
-          const tweetText = encodeURIComponent(summary.length > 260 ? summary.slice(0,257)+"…" : summary);
-          tweetA.href = `https://twitter.com/intent/tweet?text=${tweetText}&url=${encodeURIComponent(url)}&via=baltikpostasi`;
+          const PREFIX = "KısaKısaBaltıklardan — "; // başlığa istediğini yazabilirsin
+          const TWEET_LIMIT = 280;
+
+          // Metni parçalara ayır (kelime bazlı), prefix ve numaralandırma alanını dikkate al
+          function splitForTweets(text, prefix, limit) {
+            const words = text.split(/\s+/).filter(Boolean);
+            const rawChunks = [];
+            let cur = "";
+            const reserve = 8; // " (1/9)" vb. için kaba pay
+            const hardCap = Math.max(40, limit - prefix.length - reserve);
+            for (const w of words) {
+              if ((prefix.length + cur.length + (cur ? 1 : 0) + w.length + reserve) <= limit) {
+                cur += (cur ? " " : "") + w;
+              } else {
+                if (cur) rawChunks.push(cur);
+                // çok uzun tek kelimeyi kırp
+                if (w.length > hardCap) {
+                  rawChunks.push(w.slice(0, hardCap - 1) + "…");
+                  cur = "";
+                } else {
+                  cur = w;
+                }
+              }
+            }
+            if (cur) rawChunks.push(cur);
+            const N = Math.max(1, rawChunks.length);
+            // Numara ekleyerek final oluştur
+            const chunks = rawChunks.map((c, i) => {
+              const num = ` (${i+1}/${N})`;
+              let t = prefix + c + num;
+              if (t.length > limit) {
+                // son çare: biraz kısalt
+                const over = t.length - limit;
+                t = prefix + c.slice(0, Math.max(0, c.length - over - 1)) + "…" + num;
+              }
+              return t;
+            });
+            return chunks.length ? chunks : [prefix + text.slice(0, limit - prefix.length - 1) + "… (1/1)"];
+          }
+
+          const tweets = splitForTweets(summary.trim(), PREFIX, TWEET_LIMIT);
+          tweetA.onclick = async (ev) => {
+            ev.preventDefault();
+            // İlk tweet'i intent ile aç (sadece metin, link yok)
+            const first = tweets[0];
+            const intent1 = `https://twitter.com/intent/tweet?text=${encodeURIComponent(first)}`;
+            window.open(intent1, '_blank');
+            // Kalanları panoya kopyala; kullanıcı sırasıyla cevap olarak yapıştırır
+            if (tweets.length > 1) {
+              const rest = tweets.slice(1).join("\n\n---\n\n");
+              try {
+                await navigator.clipboard.writeText(rest);
+                els.status.textContent = `1/n tweet açıldı, kalan ${tweets.length-1} tweet panoya kopyalandı.`;
+              } catch {
+                els.status.textContent = `İlk tweet açıldı. Kalanları kopyalayamadım; metni manuel kopyalayın.`;
+              }
+            } else {
+              els.status.textContent = 'Tweet hazır (tek gönderi).';
+            }
+          };
         }
       } catch (e) {
         holder.textContent = 'Özet alma sırasında hata';
