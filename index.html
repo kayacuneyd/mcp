@@ -332,7 +332,6 @@
         const articles = json.articles || json.data || [];
         if (!Array.isArray(articles) || articles.length === 0) {
           els.list.innerHTML = '<li class="text-sm text-gray-500">Sonuç yok.</li>';
-          io.disconnect();
           return;
         }
         for (const a of articles) {
@@ -358,6 +357,8 @@
           if (els.autoSummary.checked) {
             // schedule lazily by visibility
             io.observe(li);
+            // fallback: schedule soon in case IntersectionObserver doesn't fire
+            setTimeout(() => scheduleSummary(li, url, false), 0);
           }
         }
       } catch (e) {
@@ -370,7 +371,7 @@
       const newUrl = location.pathname + '?' + qs;
       history.replaceState(null, '', newUrl);
 
-      io.disconnect();
+      // io.disconnect(); (removed as per instructions)
     }
 
     function nextPage() {
