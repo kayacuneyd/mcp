@@ -105,6 +105,18 @@
           <input id="autoSummary" type="checkbox" class="h-4 w-4" checked />
           <label for="autoSummary" class="text-sm">Özetleri otomatik getir</label>
         </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Tweet prefix (başlık)</label>
+          <input id="tweetPrefix" class="w-full border rounded-lg p-2" value="#KısacaBaltıklardan — " placeholder="örn: #KısacaBaltıklardan — " />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Hashtag(ler)</label>
+          <input id="tweetTags" class="w-full border rounded-lg p-2" placeholder="#Baltik #News" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Mention(lar)</label>
+          <input id="tweetMentions" class="w-full border rounded-lg p-2" placeholder="@baltikpostasi" />
+        </div>
       </div>
 
       <div class="mt-4 flex items-center gap-2">
@@ -154,6 +166,9 @@
       , autoSummary: document.getElementById('autoSummary')
       , dateFrom: document.getElementById('dateFrom')
       , dateTo: document.getElementById('dateTo')
+      , tweetPrefix: document.getElementById('tweetPrefix')
+      , tweetTags: document.getElementById('tweetTags')
+      , tweetMentions: document.getElementById('tweetMentions')
     };
 
     // URL param -> form state
@@ -290,18 +305,22 @@
               try { await navigator.clipboard.writeText(`${summary}\n${url}`); els.status.textContent = 'Copied for share'; } catch {}
             }
           };
-          const PREFIX = "#KısacaBaltıklardan — "; // başlığa istediğini yazabilirsin
+          const PREFIX = (els.tweetPrefix.value || '').trim() + ' ';
+          const TAGS = (els.tweetTags.value || '').trim();
+          const MENTIONS = (els.tweetMentions.value || '').trim();
+          const POSTFIX = [TAGS, MENTIONS].filter(Boolean).join(' ');
           const TWEET_LIMIT = 280;
 
-          // Metni parçalara ayır (kelime bazlı), prefix ve numaralandırma alanını dikkate al
+          // Metni parçalara ayır (kelime bazlı), prefix, postfix ve numaralandırma alanını dikkate al
           function splitForTweets(text, prefix, limit) {
             const words = text.split(/\s+/).filter(Boolean);
             const rawChunks = [];
             let cur = "";
             const reserve = 8; // " (1/9)" vb. için kaba pay
-            const hardCap = Math.max(40, limit - prefix.length - reserve);
+            const postfix = POSTFIX ? ' ' + POSTFIX : '';
+            const hardCap = Math.max(40, limit - prefix.length - reserve - postfix.length);
             for (const w of words) {
-              if ((prefix.length + cur.length + (cur ? 1 : 0) + w.length + reserve) <= limit) {
+              if ((prefix.length + cur.length + (cur ? 1 : 0) + w.length + reserve + postfix.length) <= limit) {
                 cur += (cur ? " " : "") + w;
               } else {
                 if (cur) rawChunks.push(cur);
@@ -319,15 +338,14 @@
             // Numara ekleyerek final oluştur
             const chunks = rawChunks.map((c, i) => {
               const num = ` (${i+1}/${N})`;
-              let t = prefix + c + num;
+              let t = `${prefix}${c}${num}${POSTFIX ? ' ' + POSTFIX : ''}`;
               if (t.length > limit) {
-                // son çare: biraz kısalt
                 const over = t.length - limit;
-                t = prefix + c.slice(0, Math.max(0, c.length - over - 1)) + "…" + num;
+                t = `${prefix}${c.slice(0, Math.max(0, c.length - over - 1))}…${num}${POSTFIX ? ' ' + POSTFIX : ''}`;
               }
-              return t;
+              return t.trim();
             });
-            return chunks.length ? chunks : [prefix + text.slice(0, limit - prefix.length - 1) + "… (1/1)"];
+            return chunks.length ? chunks : [`${prefix}${text.slice(0, limit - prefix.length - 1)}… (1/1)${POSTFIX ? ' ' + POSTFIX : ''}`.trim()];
           }
 
           const tweets = splitForTweets(summary.trim(), PREFIX, TWEET_LIMIT);
@@ -342,7 +360,7 @@
               const rest = tweets.slice(1).join("\n\n---\n\n");
               try {
                 await navigator.clipboard.writeText(rest);
-                els.status.textContent = `1/n tweet açıldı, kalan ${tweets.length-1} tweet panoya kopyalandı.`;
+                els.status.textContent = `1/n tweet açıldı, kalan ${tweets.length-1} tweet panoya kopyalandı. (${[TAGS, MENTIONS].filter(Boolean).length ? 'Hashtag/Mention dahil' : 'Ek etiketsiz'})`;
               } catch {
                 els.status.textContent = `İlk tweet açıldı. Kalanları kopyalayamadım; metni manuel kopyalayın.`;
               }
